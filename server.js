@@ -1,4 +1,5 @@
 const http = require("http");
+const connection = require("./db.connection");
 const express = require("express")();
 const server = http.createServer(express);
 const bodyParser = require("body-parser");
@@ -44,7 +45,14 @@ express.use("/api/settings", require("./api/settings"));
 express.use("/api/users", require("./api/users"));
 express.use("/api", require("./api/transactions"));
 
-server.listen(PORT, () => {
-    process.env.PORT = server.address().port;
-    console.log("Listening on PORT", process.env.PORT);
+    server.listen(PORT, () => {
+        process.env.PORT = server.address().port;
+        console.log("Listening on PORT", process.env.PORT);
+        connection.connect(err => {
+            if (err) {
+                throw err
+            } else {
+                console.log("DB ready");
+            }
+    });
 });
