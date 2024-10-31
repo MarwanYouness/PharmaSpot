@@ -1,30 +1,24 @@
 const app = require("express")();
-const server = require("http").Server(app);
 const bodyParser = require("body-parser");
-const Datastore = require("@seald-io/nedb");
-const async = require("async");
-const path = require("path");
-const validator = require("validator");
-const appName = process.env.APPNAME;
-const appData = process.env.APPDATA;
-const dbPath = path.join(
-    appData,
-    appName,
-    "server",
-    "databases",
-    "customers.db",
-);
+const { createTableQuery, createTableIfNotExists } = require("../db.creator");
+const connection = require("../db.connection");
+const { selectAllRecords, selectRecord, deleteRecord, updateRecord, insertRecord } = require("../db.helper");
+
+const tableName = 'customers';
+const schema = `
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(20),
+    email VARCHAR(100),
+    address VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+`;
+
+const tableSql = createTableQuery(tableName, schema);
 
 app.use(bodyParser.json());
 
 module.exports = app;
-
-let customerDB = new Datastore({
-    filename: dbPath,
-    autoload: true,
-});
-
-customerDB.ensureIndex({ fieldName: "_id", unique: true });
 
 /**
  * GET endpoint: Get the welcome message for the Customer API.
@@ -44,18 +38,18 @@ app.get("/", function (req, res) {
  * @param {Object} res response object.
  * @returns {void}
  */
-app.get("/customer/:customerId", function (req, res) {
-    if (!req.params.customerId) {
+app.get("/customer/:customerId", createTableIfNotExists(tableSql), async (req, res) => {
+    const customerId = parseInt(req.params.customerId);
+    if (!customerId) {
         res.status(500).send("ID field is required.");
     } else {
-        customerDB.findOne(
-            {
-                _id: req.params.customerId,
-            },
-            function (err, customer) {
-                res.send(customer);
-            },
-        );
+        try {
+           const [customer] = await connection.promise().query(selectRecord(customers, customerId))
+           res.json(customer);
+        } catch (err) {
+            console.log(err);
+            res.status(500).send(`Failed to load customer with ID ${customerId}`);
+        }
     }
 });
 
@@ -66,10 +60,14 @@ app.get("/customer/:customerId", function (req, res) {
  * @param {Object} res response object.
  * @returns {void}
  */
-app.get("/all", function (req, res) {
-    customerDB.find({}, function (err, docs) {
-        res.send(docs);
-    });
+app.get("/all", createTableIfNotExists(tableSql), async (req, res) => {
+    try {
+        const [rows] = await connection.promise().query(selectAllRecords(tableName));
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Failed to load customers');
+    }
 });
 
 /**
@@ -79,19 +77,19 @@ app.get("/all", function (req, res) {
  * @param {Object} res response object.
  * @returns {void}
  */
-app.post("/customer", function (req, res) {
+app.post("/customer", createTableIfNotExists(tableSql), async (req, res) => {
     var newCustomer = req.body;
-    customerDB.insert(newCustomer, function (err, customer) {
-        if (err) {
-            console.error(err);
-            res.status(500).json({
-                error: "Internal Server Error",
-                message: "An unexpected error occurred.",
-            });
-        } else {
-            res.sendStatus(200);
-        }
-    });
+    delete req.body._id;
+    try {
+        await connection.promise().query(insertRecord(tableName, newCustomer));
+        res.sendStatus(200);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            error: "Internal Server Error",
+            message: "An unexpected error occurred.",
+        });
+    }
 });
 
 /**
@@ -101,23 +99,18 @@ app.post("/customer", function (req, res) {
  * @param {Object} res response object.
  * @returns {void}
  */
-app.delete("/customer/:customerId", function (req, res) {
-    customerDB.remove(
-        {
-            _id: req.params.customerId,
-        },
-        function (err, numRemoved) {
-            if (err) {
-                console.error(err);
-                res.status(500).json({
-                    error: "Internal Server Error",
-                    message: "An unexpected error occurred.",
-                });
-            } else {
-                res.sendStatus(200);
-            }
-        },
-    );
+app.delete("/customer/:customerId", createTableIfNotExists(tableSql), async (req, res) => {
+    const customerId = parseInt(req.params.customerId);
+    try {
+        await connection.promise().query(deleteRecord(tableName, id));
+        res.sendStatus(200);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({
+            error: "Internal Server Error",
+            message: "An unexpected error occurred.",
+        });
+    }
 });
 
 /**
@@ -127,25 +120,18 @@ app.delete("/customer/:customerId", function (req, res) {
  * @param {Object} res response object.
  * @returns {void}
  */
-app.put("/customer", function (req, res) {
-    let customerId = validator.escape(req.body._id);
-
-    customerDB.update(
-        {
-            _id: customerId,
-        },
-        req.body,
-        {},
-        function (err, numReplaced, customer) {
-            if (err) {
-                console.error(err);
-                res.status(500).json({
-                    error: "Internal Server Error",
-                    message: "An unexpected error occurred.",
-                });
-            } else {
-                res.sendStatus(200);
-            }
-        },
-    );
+app.put("/customer", createTableIfNotExists(tableSql), async (req, res) => {
+    let customerId = parseInt(req.body.id);
+    delete req.body.id
+    delete req.body._id
+    try {
+        await connection.promise().query(updateRecord(tableName, customerId, req.body))
+        res.sendStatus(200);
+    } catch (error) {
+        console.error(err);
+        res.status(500).json({
+            error: "Internal Server Error",
+            message: "An unexpected error occurred.",
+        });
+    }
 });

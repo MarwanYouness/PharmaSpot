@@ -1,5 +1,4 @@
 const app = require("express")();
-const server = require("http").Server(app);
 const bodyParser = require("body-parser");
 const { createTableQuery, createTableIfNotExists } = require("../db.creator");
 const connection = require("../db.connection");
@@ -78,7 +77,7 @@ app.post("/category", createTableIfNotExists(tableSql), async (req, res) => {
 app.delete("/category/:categoryId", createTableIfNotExists(tableSql), async (req, res) => {
     const id = parseInt(req.params.categoryId);
     try {
-        await connection.promise().query(deleteRecord, id);
+        await connection.promise().query(deleteRecord(tableName, id));
         res.sendStatus(200);
     } catch (err) {
         console.error(err);
